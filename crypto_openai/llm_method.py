@@ -55,38 +55,40 @@ def _build_snapshot_from_df(df: pd.DataFrame, fee_rate: float, min_edge: float, 
         snap["features"]["pred_rf"] = pred_rf
     return snap
 
-def llm_signal(snapshot: Dict[str, Any], model: str = "gpt-5", temperature: float = 0.0, seed: int | None = None) -> Dict[str, Any]:
+def llm_signal(
+    snapshot: Dict[str, Any],
+    model: str = "gpt-4o-mini",
+    temperature: float = 0.0,
+) -> Dict[str, Any]:
     if OpenAI is None:
         raise RuntimeError("La librairie openai n'est pas installée. Installez 'openai>=1.40'.")
+
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    kwargs = dict(
+
+    resp = client.responses.create(
         model=model,
         temperature=temperature,
-        seed=seed,
-        response_format={"type": "json_schema", "json_schema": _JSON_SCHEMA},
+        response_format={"type": "json_schema", "json_schema": {**_JSON_SCHEMA, "strict": True}},
         input=[
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": json.dumps(snapshot, ensure_ascii=False)},
         ],
     )
-    try:
-        if seed is not None:
-            resp = client.responses.create(seed=seed, **kwargs)
-        else:
-            resp = client.responses.create(**kwargs)
-    except TypeError:
-        resp = client.responses.create(**kwargs)
 
-    out_text = getattr(resp, "output_text", None)
-    if not out_text:
-        # fallback d’extraction au cas où
-        out_text = "".join(
-            getattr(c, "text", "")
-            for item in getattr(resp, "output", [])
-            for c in getattr(item, "content", [])
-            if getattr(c, "type", "") == "output_text"
-        )
-    return json.loads(out_text)
+    text = getattr(resp, "output_text", None)
+    if not text:
+        chunks = []
+        for item in getattr(resp, "output", []) or []:
+            for c in getattr(item, "content", []) or []:
+                if getattr(c, "type", "") in ("output_text", "text"):
+                    chunks.append(getattr(c, "text", ""))
+        text = "".join(chunks)
+
+    if not text:
+        raise RuntimeError("Réponse vide du LLM (impossible d'extraire le JSON).")
+
+    return json.loads(text)
+
 
 def decide_now_with_llm(df: pd.DataFrame, symbol: str, fee_rate: float, min_edge: float, model: str = "gpt-5") -> Dict[str, Any]:
     snap = _build_snapshot_from_df(df, fee_rate=fee_rate, min_edge=min_edge, symbol=symbol)
