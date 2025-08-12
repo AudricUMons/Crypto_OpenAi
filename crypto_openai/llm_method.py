@@ -20,7 +20,8 @@ _JSON_SCHEMA = {
             "reason": {"type": "string"}
         },
         "required": ["action", "confidence"]
-    }
+    },
+    "strict": True
 }
 
 _SYSTEM = (
@@ -54,11 +55,11 @@ def _build_snapshot_from_df(df: pd.DataFrame, fee_rate: float, min_edge: float, 
         snap["features"]["pred_rf"] = pred_rf
     return snap
 
-def llm_signal(snapshot: Dict[str, Any], model: str = "gpt-5", temperature: float = 0.0, seed: int = 7) -> Dict[str, Any]:
+def llm_signal(snapshot: Dict[str, Any], model: str = "gpt-5", temperature: float = 0.0, seed: int | None = None) -> Dict[str, Any]:
     if OpenAI is None:
         raise RuntimeError("La librairie openai n'est pas installée. Installez 'openai>=1.40'.")
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    resp = client.responses.create(
+    kwargs = dict(
         model=model,
         temperature=temperature,
         seed=seed,
@@ -68,7 +69,23 @@ def llm_signal(snapshot: Dict[str, Any], model: str = "gpt-5", temperature: floa
             {"role": "user", "content": json.dumps(snapshot, ensure_ascii=False)},
         ],
     )
-    out_text = resp.output_text
+    try:
+        if seed is not None:
+            resp = client.responses.create(seed=seed, **kwargs)
+        else:
+            resp = client.responses.create(**kwargs)
+    except TypeError:
+        resp = client.responses.create(**kwargs)
+
+    out_text = getattr(resp, "output_text", None)
+    if not out_text:
+        # fallback d’extraction au cas où
+        out_text = "".join(
+            getattr(c, "text", "")
+            for item in getattr(resp, "output", [])
+            for c in getattr(item, "content", [])
+            if getattr(c, "type", "") == "output_text"
+        )
     return json.loads(out_text)
 
 def decide_now_with_llm(df: pd.DataFrame, symbol: str, fee_rate: float, min_edge: float, model: str = "gpt-5") -> Dict[str, Any]:
