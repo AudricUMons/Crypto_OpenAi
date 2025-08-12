@@ -1,0 +1,15 @@
+# Python / build
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.dist/
+build/
+# Environnements
+.venv/
+venv/
+# Streamlit
+.streamlit/secrets.toml
+# Données locales / résultats
+results/
